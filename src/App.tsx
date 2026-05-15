@@ -77,8 +77,9 @@ const CameraPlayer: React.FC<CameraPlayerProps> = ({
     const domain = region === 'https://open.ys7.com' ? 'open.ys7.com' : 'open.ezviz.com';
     const recSuffix = recType === 'cloud' ? '.cloud.rec' : '.rec';
 
-    const startFormatted = playbackTime.replace(/[-T:]/g, '');
-    const endFormatted = playbackEndTime.replace(/[-T:]/g, '');
+    // Ensure time strings are exactly 14 characters (yyyyMMddHHmmss)
+    const startFormatted = playbackTime.replace(/[-T:]/g, '').padEnd(14, '0');
+    const endFormatted = playbackEndTime.replace(/[-T:]/g, '').padEnd(14, '0');
 
     const url = mode === 'live'
       ? `ezopen://${domain}/${cleanSerial}/${device.channelNo}.live`
@@ -121,7 +122,12 @@ const CameraPlayer: React.FC<CameraPlayerProps> = ({
       } catch (e) { }
       playerRef.current = null;
     }
+    if (containerRef.current) {
+      containerRef.current.innerHTML = '';
+    }
     setIsPlaying(false);
+    setIsLoading(false);
+    setError(null);
   };
 
   const displayName = device.channelName || device.name || device.deviceName || device.cameraName;
@@ -152,7 +158,8 @@ const CameraPlayer: React.FC<CameraPlayerProps> = ({
           <div className={`status-dot ${device.status === 1 ? 'online' : 'offline'}`} title={device.status === 1 ? 'Online' : 'Offline'}></div>
         </div>
       </div>
-      <div id={playerId} ref={containerRef} className="camera-player-container">
+      <div className="camera-player-container">
+        <div id={playerId} ref={containerRef} style={{ width: '100%', height: '100%' }}></div>
         {isLoading && (
           <div className="loading-overlay">
             <div className="spinner"></div>
@@ -199,6 +206,10 @@ const App: React.FC = () => {
   // Single or All mode
   const [isAllActive, setIsAllActive] = useState(false);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+
+  // Playback single mode
+  const [selectedRecDevice, setSelectedRecDevice] = useState<string>('');
+  const [isSingleRecActive, setIsSingleRecActive] = useState(false);
 
   // Fetch token if AppKey/Secret are provided
   const fetchToken = async () => {
@@ -301,14 +312,14 @@ const App: React.FC = () => {
           <div className="mode-toggle">
             <button
               className={`mode-btn ${mode === 'live' ? 'active' : ''}`}
-              onClick={() => { setMode('live'); setIsAllActive(false); }}
+              onClick={() => { setMode('live'); setIsAllActive(false); setIsSingleRecActive(false); }}
             >
               <Video size={16} style={{ marginBottom: -3, marginRight: 6 }} />
               Live Stream
             </button>
             <button
               className={`mode-btn ${mode === 'rec' ? 'active' : ''}`}
-              onClick={() => { setMode('rec'); setIsAllActive(false); }}
+              onClick={() => { setMode('rec'); setIsAllActive(false); setIsSingleRecActive(false); }}
             >
               <Play size={16} style={{ marginBottom: -3, marginRight: 6 }} />
               Playback
@@ -327,7 +338,7 @@ const App: React.FC = () => {
 
           <div className="input-group">
             <label>Server Region</label>
-            <select value={region} onChange={(e) => { setRegion(e.target.value); setDevices([]); setIsAllActive(false); }}>
+            <select value={region} onChange={(e) => { setRegion(e.target.value); setDevices([]); setIsAllActive(false); setSelectedRecDevice(''); setIsSingleRecActive(false); }}>
               <option value="https://isgpopen.ezvizlife.com">Asia/Singapore</option>
               <option value="https://iusopen.ezvizlife.com">North America</option>
               <option value="https://isaopen.ezvizlife.com">South America</option>
@@ -398,18 +409,48 @@ const App: React.FC = () => {
                   onChange={(e) => setPlaybackEndTime(e.target.value)}
                 />
               </div>
+              <div className="input-group">
+                <label>Select Camera</label>
+                <select 
+                  value={selectedRecDevice} 
+                  onChange={(e) => setSelectedRecDevice(e.target.value)}
+                  disabled={devices.length === 0}
+                >
+                  <option value="">-- Choose a Camera --</option>
+                  {devices.map(device => {
+                    const displayName = device.channelName || device.name || device.deviceName || device.cameraName;
+                    const headerTitle = displayName ? `${device.deviceSerial} - ${displayName}` : device.deviceSerial;
+                    return (
+                      <option key={`${device.deviceSerial}-${device.channelNo}`} value={`${device.deviceSerial}-${device.channelNo}`}>
+                        {headerTitle}
+                      </option>
+                    )
+                  })}
+                </select>
+              </div>
             </>
           )}
 
           <div className="controls-grid" style={{ marginTop: '2rem' }}>
-            <button
-              className={`btn ${isAllActive ? 'btn-secondary' : 'btn-primary'}`}
-              onClick={toggleAllStreams}
-              disabled={devices.length === 0}
-            >
-              {isAllActive ? <Video size={18} /> : <Play size={18} />}
-              {isAllActive ? 'Stop All' : 'Play All'}
-            </button>
+            {mode === 'live' ? (
+              <button
+                className={`btn ${isAllActive ? 'btn-secondary' : 'btn-primary'}`}
+                onClick={toggleAllStreams}
+                disabled={devices.length === 0}
+              >
+                {isAllActive ? <Video size={18} /> : <Play size={18} />}
+                {isAllActive ? 'Stop All' : 'Play All'}
+              </button>
+            ) : (
+              <button
+                className={`btn ${isSingleRecActive ? 'btn-secondary' : 'btn-primary'}`}
+                onClick={() => setIsSingleRecActive(!isSingleRecActive)}
+                disabled={devices.length === 0 || !selectedRecDevice}
+              >
+                {isSingleRecActive ? <Square size={18} /> : <Play size={18} />}
+                {isSingleRecActive ? 'Stop Playback' : 'Start Playback'}
+              </button>
+            )}
           </div>
 
           {error && (
@@ -428,20 +469,28 @@ const App: React.FC = () => {
               <h3>No Cameras Found</h3>
               <p>Enter your Access Token and click "Fetch Device List" to load your cameras.</p>
             </div>
+          ) : mode === 'rec' && !selectedRecDevice ? (
+            <div className="empty-state">
+              <Video size={48} color="var(--border)" style={{ marginBottom: '1rem' }} />
+              <h3>Select a Camera</h3>
+              <p>Please choose a camera from the sidebar to view playback.</p>
+            </div>
           ) : (
-            <div className="cameras-grid">
-              {devices.map((device, index) => (
-                <CameraPlayer
-                  key={`${device.deviceSerial}-${device.channelNo}`}
-                  index={index}
-                  device={device}
-                  accessToken={accessToken}
-                  region={region}
-                  mode={mode}
-                  recType={recType}
-                  playbackTime={playbackTime}
-                  playbackEndTime={playbackEndTime}
-                  isActive={isAllActive}
+            <div className={`cameras-grid ${mode === 'rec' ? 'single-camera-mode' : ''}`}>
+              {devices
+                .filter(device => mode === 'live' || `${device.deviceSerial}-${device.channelNo}` === selectedRecDevice)
+                .map((device, index) => (
+                  <CameraPlayer
+                    key={`${device.deviceSerial}-${device.channelNo}`}
+                    index={index}
+                    device={device}
+                    accessToken={accessToken}
+                    region={region}
+                    mode={mode}
+                    recType={recType}
+                    playbackTime={playbackTime}
+                    playbackEndTime={playbackEndTime}
+                    isActive={mode === 'live' ? isAllActive : isSingleRecActive}
                 />
               ))}
             </div>

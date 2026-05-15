@@ -92,6 +92,11 @@ main.sidebar-hidden {
   width: 100%;
 }
 
+.cameras-grid.single-camera-mode {
+  grid-template-columns: minmax(auto, 1000px);
+  justify-content: center;
+}
+
 .camera-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
