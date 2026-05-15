@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Play, Video, Key, Calendar, AlertCircle, Info, Grid, Square, PlayCircle, Menu } from 'lucide-react';
+import { Camera, Play, Video, Key, Calendar, AlertCircle, Info, Grid, Square, PlayCircle, Menu, Download } from 'lucide-react';
 import { format } from 'date-fns';
 import { EZUIKitPlayer } from 'ezuikit-js';
 
@@ -210,6 +210,7 @@ const App: React.FC = () => {
   // Playback single mode
   const [selectedRecDevice, setSelectedRecDevice] = useState<string>('');
   const [isSingleRecActive, setIsSingleRecActive] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // Fetch token if AppKey/Secret are provided
   const fetchToken = async () => {
@@ -287,11 +288,56 @@ const App: React.FC = () => {
     setIsAllActive(!isAllActive);
   };
 
+  const handleDownload = async () => {
+    if (!accessToken || !selectedRecDevice) return;
+
+    setIsDownloading(true);
+    setError(null);
+
+    try {
+      const [deviceSerial, channelNo] = selectedRecDevice.split('-');
+
+      // Convert time to milliseconds for the API
+      const startMs = new Date(playbackTime).getTime();
+      const endMs = new Date(playbackEndTime).getTime();
+
+      const response = await fetch(`${region}/api/lapp/video/by/time`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `accessToken=${accessToken}&deviceSerial=${deviceSerial}&channelNo=${channelNo}&startTime=${startMs}&endTime=${endMs}&stopTime=${endMs}&type=${recType === 'cloud' ? 1 : 2}&recType=${recType === 'cloud' ? 1 : 2}`,
+      });
+
+      const data = await response.json();
+      console.log("Video search API response:", data);
+
+      if (data.code === '200') {
+        if (data.data && data.data.length > 0) {
+          const segment = data.data[0];
+          if (segment.downloadPath) {
+            window.open(segment.downloadPath, '_blank');
+          } else {
+            setError("No direct download link available. Note: Downloading SD Card recordings directly via Web is not supported by EZVIZ API. Please use EZVIZ Studio PC.");
+          }
+        } else {
+          setError(`No video recordings found for the selected time range. Note: Direct download of SD Card recordings is restricted by EZVIZ API. Please use EZVIZ Studio PC.`);
+        }
+      } else {
+        setError(data.msg || "Failed to search for video recordings");
+      }
+    } catch (err) {
+      setError("Network error while trying to download video");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   return (
     <div className="app-container">
       <header>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <button 
+          <button
             onClick={() => setIsSidebarVisible(!isSidebarVisible)}
             style={{ background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
             title="Toggle Sidebar"
@@ -309,157 +355,167 @@ const App: React.FC = () => {
       <main className={isSidebarVisible ? '' : 'sidebar-hidden'}>
         {isSidebarVisible && (
           <aside className="panel">
-          <div className="mode-toggle">
-            <button
-              className={`mode-btn ${mode === 'live' ? 'active' : ''}`}
-              onClick={() => { setMode('live'); setIsAllActive(false); setIsSingleRecActive(false); }}
-            >
-              <Video size={16} style={{ marginBottom: -3, marginRight: 6 }} />
-              Live Stream
-            </button>
-            <button
-              className={`mode-btn ${mode === 'rec' ? 'active' : ''}`}
-              onClick={() => { setMode('rec'); setIsAllActive(false); setIsSingleRecActive(false); }}
-            >
-              <Play size={16} style={{ marginBottom: -3, marginRight: 6 }} />
-              Playback
-            </button>
-          </div>
-
-          <div className="input-group">
-            <label><Key size={14} style={{ marginBottom: -2, marginRight: 4 }} /> Access Token</label>
-            <input
-              type="password"
-              placeholder="Paste your accessToken here"
-              value={accessToken}
-              onChange={(e) => setAccessToken(e.target.value)}
-            />
-          </div>
-
-          <div className="input-group">
-            <label>Server Region</label>
-            <select value={region} onChange={(e) => { setRegion(e.target.value); setDevices([]); setIsAllActive(false); setSelectedRecDevice(''); setIsSingleRecActive(false); }}>
-              <option value="https://isgpopen.ezvizlife.com">Asia/Singapore</option>
-              <option value="https://iusopen.ezvizlife.com">North America</option>
-              <option value="https://isaopen.ezvizlife.com">South America</option>
-              <option value="https://ieuopen.ezvizlife.com">Europe</option>
-              <option value="https://iindiaopen.ezvizlife.com">India</option>
-              <option value="https://open.ys7.com">China (ys7.com)</option>
-            </select>
-          </div>
-
-          <details style={{ marginBottom: '1.5rem' }}>
-            <summary style={{ cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
-              Don't have a token? Use AppKey / Secret
-            </summary>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '0.5rem' }}>
-              <div className="input-group">
-                <input
-                  type="text"
-                  placeholder="AppKey"
-                  value={appKey}
-                  onChange={(e) => setAppKey(e.target.value)}
-                />
-              </div>
-              <div className="input-group">
-                <input
-                  type="password"
-                  placeholder="AppSecret"
-                  value={appSecret}
-                  onChange={(e) => setAppSecret(e.target.value)}
-                />
-              </div>
+            <div className="mode-toggle">
+              <button
+                className={`mode-btn ${mode === 'live' ? 'active' : ''}`}
+                onClick={() => { setMode('live'); setIsAllActive(false); setIsSingleRecActive(false); setError(null); }}
+              >
+                <Video size={16} style={{ marginBottom: -3, marginRight: 6 }} />
+                Live Stream
+              </button>
+              <button
+                className={`mode-btn ${mode === 'rec' ? 'active' : ''}`}
+                onClick={() => { setMode('rec'); setIsAllActive(false); setIsSingleRecActive(false); setError(null); }}
+              >
+                <Play size={16} style={{ marginBottom: -3, marginRight: 6 }} />
+                Playback
+              </button>
             </div>
-            <button className="btn btn-secondary" onClick={fetchToken} style={{ marginBottom: '1rem' }} disabled={isLoading}>
-              {isLoading && !accessToken ? 'Fetching...' : 'Fetch Token from API'}
+
+            <div className="input-group">
+              <label><Key size={14} style={{ marginBottom: -2, marginRight: 4 }} /> Access Token</label>
+              <input
+                type="password"
+                placeholder="Paste your accessToken here"
+                value={accessToken}
+                onChange={(e) => setAccessToken(e.target.value)}
+              />
+            </div>
+
+            <div className="input-group">
+              <label>Server Region</label>
+              <select value={region} onChange={(e) => { setRegion(e.target.value); setDevices([]); setIsAllActive(false); setSelectedRecDevice(''); setIsSingleRecActive(false); }}>
+                <option value="https://isgpopen.ezvizlife.com">Asia/Singapore</option>
+                <option value="https://iusopen.ezvizlife.com">North America</option>
+                <option value="https://isaopen.ezvizlife.com">South America</option>
+                <option value="https://ieuopen.ezvizlife.com">Europe</option>
+                <option value="https://iindiaopen.ezvizlife.com">India</option>
+                <option value="https://open.ys7.com">China (ys7.com)</option>
+              </select>
+            </div>
+
+            <details style={{ marginBottom: '1.5rem' }}>
+              <summary style={{ cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
+                Don't have a token? Use AppKey / Secret
+              </summary>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '0.5rem' }}>
+                <div className="input-group">
+                  <input
+                    type="text"
+                    placeholder="AppKey"
+                    value={appKey}
+                    onChange={(e) => setAppKey(e.target.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <input
+                    type="password"
+                    placeholder="AppSecret"
+                    value={appSecret}
+                    onChange={(e) => setAppSecret(e.target.value)}
+                  />
+                </div>
+              </div>
+              <button className="btn btn-secondary" onClick={fetchToken} style={{ marginBottom: '1rem' }} disabled={isLoading}>
+                {isLoading && !accessToken ? 'Fetching...' : 'Fetch Token from API'}
+              </button>
+            </details>
+
+            <button className="btn btn-primary" onClick={fetchDevices} style={{ marginBottom: '1.5rem' }} disabled={isLoading || !accessToken}>
+              <Camera size={18} />
+              {isLoading && accessToken ? 'Fetching Devices...' : 'Fetch Device List'}
             </button>
-          </details>
 
-          <button className="btn btn-primary" onClick={fetchDevices} style={{ marginBottom: '1.5rem' }} disabled={isLoading || !accessToken}>
-            <Camera size={18} />
-            {isLoading && accessToken ? 'Fetching Devices...' : 'Fetch Device List'}
-          </button>
+            <hr style={{ border: 'none', borderTop: '1px solid var(--border)', marginBottom: '1.5rem' }} />
 
-          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', marginBottom: '1.5rem' }} />
+            {mode === 'rec' && (
+              <>
+                <div className="input-group">
+                  <label>Storage Type</label>
+                  <select value={recType} onChange={(e) => setRecType(e.target.value as 'local' | 'cloud')}>
+                    <option value="local">SD Card (Local)</option>
+                    <option value="cloud">Cloud Storage</option>
+                  </select>
+                </div>
+                <div className="input-group">
+                  <label><Calendar size={14} style={{ marginBottom: -2, marginRight: 4 }} /> Start Time</label>
+                  <input
+                    type="datetime-local"
+                    step="1"
+                    value={playbackTime}
+                    onChange={(e) => setPlaybackTime(e.target.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <label><Calendar size={14} style={{ marginBottom: -2, marginRight: 4 }} /> End Time</label>
+                  <input
+                    type="datetime-local"
+                    step="1"
+                    value={playbackEndTime}
+                    onChange={(e) => setPlaybackEndTime(e.target.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <label>Select Camera</label>
+                  <select
+                    value={selectedRecDevice}
+                    onChange={(e) => setSelectedRecDevice(e.target.value)}
+                    disabled={devices.length === 0}
+                  >
+                    <option value="">-- Choose a Camera --</option>
+                    {devices.map(device => {
+                      const displayName = device.channelName || device.name || device.deviceName || device.cameraName;
+                      const headerTitle = displayName ? `${device.deviceSerial} - ${displayName}` : device.deviceSerial;
+                      return (
+                        <option key={`${device.deviceSerial}-${device.channelNo}`} value={`${device.deviceSerial}-${device.channelNo}`}>
+                          {headerTitle}
+                        </option>
+                      )
+                    })}
+                  </select>
+                </div>
+              </>
+            )}
 
-          {mode === 'rec' && (
-            <>
-              <div className="input-group">
-                <label>Storage Type</label>
-                <select value={recType} onChange={(e) => setRecType(e.target.value as 'local' | 'cloud')}>
-                  <option value="local">SD Card (Local)</option>
-                  <option value="cloud">Cloud Storage</option>
-                </select>
-              </div>
-              <div className="input-group">
-                <label><Calendar size={14} style={{ marginBottom: -2, marginRight: 4 }} /> Start Time</label>
-                <input
-                  type="datetime-local"
-                  step="1"
-                  value={playbackTime}
-                  onChange={(e) => setPlaybackTime(e.target.value)}
-                />
-              </div>
-              <div className="input-group">
-                <label><Calendar size={14} style={{ marginBottom: -2, marginRight: 4 }} /> End Time</label>
-                <input
-                  type="datetime-local"
-                  step="1"
-                  value={playbackEndTime}
-                  onChange={(e) => setPlaybackEndTime(e.target.value)}
-                />
-              </div>
-              <div className="input-group">
-                <label>Select Camera</label>
-                <select 
-                  value={selectedRecDevice} 
-                  onChange={(e) => setSelectedRecDevice(e.target.value)}
+            <div className="controls-grid" style={{ marginTop: '2rem' }}>
+              {mode === 'live' ? (
+                <button
+                  className={`btn ${isAllActive ? 'btn-secondary' : 'btn-primary'}`}
+                  onClick={toggleAllStreams}
                   disabled={devices.length === 0}
                 >
-                  <option value="">-- Choose a Camera --</option>
-                  {devices.map(device => {
-                    const displayName = device.channelName || device.name || device.deviceName || device.cameraName;
-                    const headerTitle = displayName ? `${device.deviceSerial} - ${displayName}` : device.deviceSerial;
-                    return (
-                      <option key={`${device.deviceSerial}-${device.channelNo}`} value={`${device.deviceSerial}-${device.channelNo}`}>
-                        {headerTitle}
-                      </option>
-                    )
-                  })}
-                </select>
-              </div>
-            </>
-          )}
-
-          <div className="controls-grid" style={{ marginTop: '2rem' }}>
-            {mode === 'live' ? (
-              <button
-                className={`btn ${isAllActive ? 'btn-secondary' : 'btn-primary'}`}
-                onClick={toggleAllStreams}
-                disabled={devices.length === 0}
-              >
-                {isAllActive ? <Video size={18} /> : <Play size={18} />}
-                {isAllActive ? 'Stop All' : 'Play All'}
-              </button>
-            ) : (
-              <button
-                className={`btn ${isSingleRecActive ? 'btn-secondary' : 'btn-primary'}`}
-                onClick={() => setIsSingleRecActive(!isSingleRecActive)}
-                disabled={devices.length === 0 || !selectedRecDevice}
-              >
-                {isSingleRecActive ? <Square size={18} /> : <Play size={18} />}
-                {isSingleRecActive ? 'Stop Playback' : 'Start Playback'}
-              </button>
-            )}
-          </div>
-
-          {error && (
-            <div style={{ marginTop: '1rem', padding: '0.75rem', borderRadius: '0.5rem', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', fontSize: '0.875rem', display: 'flex', gap: '0.5rem' }}>
-              <AlertCircle size={16} style={{ flexShrink: 0 }} />
-              <div style={{ wordBreak: 'break-word' }}>{error}</div>
+                  {isAllActive ? <Video size={18} /> : <Play size={18} />}
+                  {isAllActive ? 'Stop All' : 'Play All'}
+                </button>
+              ) : (
+                <>
+                  <button
+                    className={`btn ${isSingleRecActive ? 'btn-secondary' : 'btn-primary'}`}
+                    onClick={() => setIsSingleRecActive(!isSingleRecActive)}
+                    disabled={devices.length === 0 || !selectedRecDevice}
+                  >
+                    {isSingleRecActive ? <Square size={18} /> : <Play size={18} />}
+                    {isSingleRecActive ? 'Stop Playback' : 'Start Playback'}
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={handleDownload}
+                    disabled={devices.length === 0 || !selectedRecDevice || isDownloading}
+                  >
+                    <Download size={18} />
+                    {isDownloading ? 'Downloading...' : 'Download'}
+                  </button>
+                </>
+              )}
             </div>
-          )}
-        </aside>
+
+            {error && (
+              <div style={{ marginTop: '1rem', padding: '0.75rem', borderRadius: '0.5rem', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', fontSize: '0.875rem', display: 'flex', gap: '0.5rem' }}>
+                <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                <div style={{ wordBreak: 'break-word' }}>{error}</div>
+              </div>
+            )}
+          </aside>
         )}
 
         <section className="video-section">
@@ -491,8 +547,8 @@ const App: React.FC = () => {
                     playbackTime={playbackTime}
                     playbackEndTime={playbackEndTime}
                     isActive={mode === 'live' ? isAllActive : isSingleRecActive}
-                />
-              ))}
+                  />
+                ))}
             </div>
           )}
         </section>
