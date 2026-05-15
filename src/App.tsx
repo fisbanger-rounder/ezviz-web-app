@@ -1,22 +1,172 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Play, Video, Key, Calendar, RefreshCw, AlertCircle, Info } from 'lucide-react';
+import { Camera, Play, Video, Key, Calendar, RefreshCw, AlertCircle, Info, Grid, Square, PlayCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { EZUIKitPlayer } from 'ezuikit-js';
 
-// Add global type definition for EZUIKit
+// Global type definition for EZUIKit
 declare global {
   interface Window {
     EZUIKit: any;
   }
 }
 
+interface Device {
+  deviceSerial: string;
+  channelNo: number;
+  cameraName: string;
+  status: number;
+}
+
+interface CameraPlayerProps {
+  device: Device;
+  accessToken: string;
+  region: string;
+  mode: 'live' | 'rec';
+  recType: 'local' | 'cloud';
+  playbackTime: string;
+  playbackEndTime: string;
+  isActive: boolean;
+}
+
+const CameraPlayer: React.FC<CameraPlayerProps> = ({
+  device, accessToken, region, mode, recType, playbackTime, playbackEndTime, isActive
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [localIsActive, setLocalIsActive] = useState(isActive);
+  const playerId = `video-container-${device.deviceSerial}-${device.channelNo}`;
+
+  useEffect(() => {
+    setLocalIsActive(isActive);
+  }, [isActive]);
+
+  useEffect(() => {
+    if (localIsActive) {
+      startStream();
+    } else {
+      stopStream();
+    }
+    return () => stopStream();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localIsActive, mode, playbackTime, playbackEndTime]); // Re-run if these change while active
+
+  const startStream = () => {
+    if (!accessToken) return;
+
+    setIsLoading(true);
+    setError(null);
+    stopStream();
+
+    const cleanSerial = device.deviceSerial.trim().toUpperCase();
+    const domain = region === 'https://open.ys7.com' ? 'open.ys7.com' : 'open.ezviz.com';
+    const recSuffix = recType === 'cloud' ? '.cloud.rec' : '.rec';
+
+    const startFormatted = playbackTime.replace(/[-T:]/g, '');
+    const endFormatted = playbackEndTime.replace(/[-T:]/g, '');
+
+    const url = mode === 'live'
+      ? `ezopen://${domain}/${cleanSerial}/${device.channelNo}.live`
+      : `ezopen://${domain}/${cleanSerial}/${device.channelNo}${recSuffix}?begin=${startFormatted}&end=${endFormatted}`;
+
+    try {
+      playerRef.current = new EZUIKitPlayer({
+        id: playerId,
+        accessToken: accessToken,
+        url: url,
+        template: mode === 'live' ? 'pcLive' : 'pcRec',
+        width: containerRef.current?.clientWidth || 400,
+        height: containerRef.current?.clientHeight || 225,
+        autoplay: true,
+        staticPath: '/ezuikit_static',
+        ...(region !== 'https://open.ys7.com' ? { env: { domain: region } } : {}),
+        handleError: (err: any) => {
+          console.error(`EZUIKit Error (${device.deviceSerial}):`, err);
+          setError("Player error");
+          setIsLoading(false);
+          setIsPlaying(false);
+        },
+        handleSuccess: () => {
+          setIsPlaying(true);
+          setIsLoading(false);
+          setError(null);
+        }
+      });
+    } catch (err) {
+      setError("Init error");
+      setIsLoading(false);
+      setIsPlaying(false);
+    }
+  };
+
+  const stopStream = () => {
+    if (playerRef.current) {
+      try {
+        playerRef.current.stop();
+      } catch (e) { }
+      playerRef.current = null;
+    }
+    setIsPlaying(false);
+  };
+
+  return (
+    <div className="camera-card">
+      <div className="camera-header">
+        <div className="camera-title" title={device.cameraName}>{device.cameraName || device.deviceSerial}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <button
+            onClick={() => setLocalIsActive(!localIsActive)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: localIsActive ? '#ef4444' : '#10b981',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              padding: 0
+            }}
+            title={localIsActive ? "Stop Stream" : "Start Stream"}
+          >
+            {localIsActive ? <Square size={16} fill="currentColor" /> : <PlayCircle size={18} />}
+          </button>
+          <div className={`status-dot ${device.status === 1 ? 'online' : 'offline'}`} title={device.status === 1 ? 'Online' : 'Offline'}></div>
+        </div>
+      </div>
+      <div id={playerId} ref={containerRef} className="camera-player-container">
+        {isLoading && (
+          <div className="loading-overlay">
+            <div className="spinner"></div>
+            <p style={{ fontSize: '0.75rem', marginTop: '0.5rem' }}>Loading...</p>
+          </div>
+        )}
+        {!isPlaying && !isLoading && !error && (
+          <div className="loading-overlay" style={{ background: '#000' }}>
+            <Video size={32} color="var(--border)" />
+          </div>
+        )}
+        {error && (
+          <div className="loading-overlay" style={{ background: '#000' }}>
+            <AlertCircle size={24} color="#ef4444" style={{ marginBottom: '0.5rem' }} />
+            <div style={{ color: '#ef4444', fontSize: '0.75rem' }}>{error}</div>
+          </div>
+        )}
+      </div>
+      <div className="camera-footer">
+        <span className="camera-meta">CH: {device.channelNo}</span>
+        <span className="camera-meta">{device.deviceSerial}</span>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   // Config State
   const [appKey, setAppKey] = useState('');
   const [appSecret, setAppSecret] = useState('');
   const [accessToken, setAccessToken] = useState('');
-  const [serial, setSerial] = useState('');
-  const [channel, setChannel] = useState('1');
+
   const [mode, setMode] = useState<'live' | 'rec'>('live');
   const [playbackTime, setPlaybackTime] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm:ss"));
   const [playbackEndTime, setPlaybackEndTime] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm:ss"));
@@ -24,12 +174,12 @@ const App: React.FC = () => {
   const [region, setRegion] = useState('https://isgpopen.ezvizlife.com');
 
   // App State
+  const [devices, setDevices] = useState<Device[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isPlayerActive, setIsPlayerActive] = useState(false);
 
-  const playerRef = useRef<any>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Single or All mode
+  const [isAllActive, setIsAllActive] = useState(false);
 
   // Fetch token if AppKey/Secret are provided
   const fetchToken = async () => {
@@ -54,6 +204,7 @@ const App: React.FC = () => {
 
       if (data.code === '200') {
         setAccessToken(data.data.accessToken);
+        setError(null);
       } else {
         setError(data.msg || "Failed to fetch token");
       }
@@ -64,83 +215,55 @@ const App: React.FC = () => {
     }
   };
 
-  const startStream = () => {
-    if (!accessToken || !serial) {
-      setError("AccessToken and Serial Number are required");
+  const fetchDevices = async () => {
+    if (!accessToken) {
+      setError("Access Token is required to fetch devices.");
       return;
     }
 
     setIsLoading(true);
     setError(null);
 
-    // Destroy existing player if any
-    if (playerRef.current) {
-      try {
-        playerRef.current.stop();
-      } catch (e) { }
-    }
-
-    const cleanSerial = serial.trim().toUpperCase();
-    const domain = region === 'https://open.ys7.com' ? 'open.ys7.com' : 'open.ezviz.com';
-    const recSuffix = recType === 'cloud' ? '.cloud.rec' : '.rec';
-    
-    // Convert '2026-05-13T00:00:00' to '20260513000000'
-    const startFormatted = playbackTime.replace(/[-T:]/g, '');
-    const endFormatted = playbackEndTime.replace(/[-T:]/g, '');
-
-    const url = mode === 'live'
-      ? `ezopen://${domain}/${cleanSerial}/${channel}.live`
-      : `ezopen://${domain}/${cleanSerial}/${channel}${recSuffix}?begin=${startFormatted}&end=${endFormatted}`;
-
     try {
-      playerRef.current = new EZUIKitPlayer({
-        id: 'video-container',
-        accessToken: accessToken,
-        url: url,
-        template: mode === 'live' ? 'pcLive' : 'pcRec',
-        width: containerRef.current?.clientWidth || 800,
-        height: containerRef.current?.clientHeight || 450,
-        autoplay: true,
-        staticPath: '/ezuikit_static',
-        ...(region !== 'https://open.ys7.com' ? { env: { domain: region } } : {}),
-        handleError: (err: any) => {
-          console.error("EZUIKit Error:", err);
-          setError("Player error: " + JSON.stringify(err));
-          setIsLoading(false);
+      const response = await fetch(`${region}/api/lapp/camera/list`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
-        handleSuccess: () => {
-          setIsPlayerActive(true);
-          setIsLoading(false);
-        }
+        // We fetch up to 50 devices
+        body: `accessToken=${accessToken}&pageStart=0&pageSize=50`,
       });
+
+      const data = await response.json();
+
+      if (data.code === '200') {
+        setDevices(data.data);
+        setError(null);
+      } else {
+        setError(data.msg || "Failed to fetch device list");
+      }
     } catch (err) {
-      setError("Initialization error: " + err);
+      setError("Network error while fetching device list");
+    } finally {
       setIsLoading(false);
     }
   };
 
-  const stopStream = () => {
-    if (playerRef.current) {
-      playerRef.current.stop();
-      setIsPlayerActive(false);
+  const toggleAllStreams = () => {
+    if (devices.length === 0) {
+      setError("No devices available. Please fetch devices first.");
+      return;
     }
+    setIsAllActive(!isAllActive);
   };
-
-  useEffect(() => {
-    return () => {
-      if (playerRef.current) {
-        playerRef.current.stop();
-      }
-    };
-  }, []);
 
   return (
     <div className="app-container">
       <header>
-        <div className="logo">EZVIZ PRO STREAM</div>
+        <div className="logo">PLN UP2D BANTEN CCTV-AI</div>
         <div className="status-badge">
           <Info size={14} />
-          SDK v5.1.18 Ready
+          {devices.length > 0 ? `${devices.length} Cameras Loaded` : 'SDK v5.1.18 Ready'}
         </div>
       </header>
 
@@ -149,14 +272,14 @@ const App: React.FC = () => {
           <div className="mode-toggle">
             <button
               className={`mode-btn ${mode === 'live' ? 'active' : ''}`}
-              onClick={() => setMode('live')}
+              onClick={() => { setMode('live'); setIsAllActive(false); }}
             >
               <Video size={16} style={{ marginBottom: -3, marginRight: 6 }} />
               Live Stream
             </button>
             <button
               className={`mode-btn ${mode === 'rec' ? 'active' : ''}`}
-              onClick={() => setMode('rec')}
+              onClick={() => { setMode('rec'); setIsAllActive(false); }}
             >
               <Play size={16} style={{ marginBottom: -3, marginRight: 6 }} />
               Playback
@@ -175,7 +298,7 @@ const App: React.FC = () => {
 
           <div className="input-group">
             <label>Server Region</label>
-            <select value={region} onChange={(e) => setRegion(e.target.value)}>
+            <select value={region} onChange={(e) => { setRegion(e.target.value); setDevices([]); setIsAllActive(false); }}>
               <option value="https://isgpopen.ezvizlife.com">Asia/Singapore</option>
               <option value="https://iusopen.ezvizlife.com">North America</option>
               <option value="https://isaopen.ezvizlife.com">South America</option>
@@ -185,51 +308,39 @@ const App: React.FC = () => {
             </select>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div className="input-group">
-              <label><RefreshCw size={14} style={{ marginBottom: -2, marginRight: 4 }} /> AppKey (Optional)</label>
-              <input
-                type="text"
-                placeholder="Key"
-                value={appKey}
-                onChange={(e) => setAppKey(e.target.value)}
-              />
+          <details style={{ marginBottom: '1.5rem' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
+              Don't have a token? Use AppKey / Secret
+            </summary>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '0.5rem' }}>
+              <div className="input-group">
+                <input
+                  type="text"
+                  placeholder="AppKey"
+                  value={appKey}
+                  onChange={(e) => setAppKey(e.target.value)}
+                />
+              </div>
+              <div className="input-group">
+                <input
+                  type="password"
+                  placeholder="AppSecret"
+                  value={appSecret}
+                  onChange={(e) => setAppSecret(e.target.value)}
+                />
+              </div>
             </div>
-            <div className="input-group">
-              <label>AppSecret</label>
-              <input
-                type="password"
-                placeholder="Secret"
-                value={appSecret}
-                onChange={(e) => setAppSecret(e.target.value)}
-              />
-            </div>
-          </div>
+            <button className="btn btn-secondary" onClick={fetchToken} style={{ marginBottom: '1rem' }} disabled={isLoading}>
+              {isLoading && !accessToken ? 'Fetching...' : 'Fetch Token from API'}
+            </button>
+          </details>
 
-          <button className="btn btn-secondary" onClick={fetchToken} style={{ marginBottom: '1.5rem' }}>
-            Fetch Token from API
+          <button className="btn btn-primary" onClick={fetchDevices} style={{ marginBottom: '1.5rem' }} disabled={isLoading || !accessToken}>
+            <Camera size={18} />
+            {isLoading && accessToken ? 'Fetching Devices...' : 'Fetch Device List'}
           </button>
 
           <hr style={{ border: 'none', borderTop: '1px solid var(--border)', marginBottom: '1.5rem' }} />
-
-          <div className="input-group">
-            <label><Camera size={14} style={{ marginBottom: -2, marginRight: 4 }} /> Device Serial</label>
-            <input
-              type="text"
-              placeholder="e.g. C12345678"
-              value={serial}
-              onChange={(e) => setSerial(e.target.value)}
-            />
-          </div>
-
-          <div className="input-group">
-            <label>Channel Number</label>
-            <select value={channel} onChange={(e) => setChannel(e.target.value)}>
-              {[1, 2, 3, 4, 5, 6, 7, 8].map(n => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-            </select>
-          </div>
 
           {mode === 'rec' && (
             <>
@@ -261,58 +372,49 @@ const App: React.FC = () => {
             </>
           )}
 
-          <div className="controls-grid">
-            <button className="btn btn-primary" onClick={startStream}>
-              {isPlayerActive ? <RefreshCw size={18} /> : <Play size={18} />}
-              {isPlayerActive ? 'Restart' : 'Start Player'}
-            </button>
-            <button className="btn btn-secondary" onClick={stopStream}>
-              Stop
+          <div className="controls-grid" style={{ marginTop: '2rem' }}>
+            <button
+              className={`btn ${isAllActive ? 'btn-secondary' : 'btn-primary'}`}
+              onClick={toggleAllStreams}
+              disabled={devices.length === 0}
+            >
+              {isAllActive ? <Video size={18} /> : <Play size={18} />}
+              {isAllActive ? 'Stop All' : 'Play All'}
             </button>
           </div>
 
           {error && (
             <div style={{ marginTop: '1rem', padding: '0.75rem', borderRadius: '0.5rem', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', fontSize: '0.875rem', display: 'flex', gap: '0.5rem' }}>
-              <AlertCircle size={16} />
-              {error}
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              <div style={{ wordBreak: 'break-word' }}>{error}</div>
             </div>
           )}
         </aside>
 
         <section className="video-section">
-          <div id="video-container" ref={containerRef}>
-            {isLoading && (
-              <div className="loading-overlay">
-                <div className="spinner"></div>
-                <p>Initializing EZVIZ Player...</p>
-              </div>
-            )}
-            {!isPlayerActive && !isLoading && (
-              <div className="loading-overlay" style={{ background: '#000' }}>
-                <Video size={48} color="var(--border)" />
-                <p style={{ color: 'var(--text-muted)' }}>Ready to stream</p>
-              </div>
-            )}
-          </div>
-
-          <div className="panel" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: '1.5rem' }}>
-              <div>
-                <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>DEVICE</span>
-                <div style={{ fontWeight: 600 }}>{serial || 'Not Selected'}</div>
-              </div>
-              <div>
-                <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>MODE</span>
-                <div style={{ fontWeight: 600, color: mode === 'live' ? '#10b981' : '#f59e0b' }}>
-                  {mode.toUpperCase()}
-                </div>
-              </div>
+          {devices.length === 0 ? (
+            <div className="empty-state">
+              <Grid size={48} color="var(--border)" style={{ marginBottom: '1rem' }} />
+              <h3>No Cameras Found</h3>
+              <p>Enter your Access Token and click "Fetch Device List" to load your cameras.</p>
             </div>
-            <div className="status-badge">
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: isPlayerActive ? '#10b981' : '#64748b' }}></div>
-              {isPlayerActive ? 'STREAMING' : 'READY'}
+          ) : (
+            <div className="cameras-grid">
+              {devices.map((device) => (
+                <CameraPlayer
+                  key={`${device.deviceSerial}-${device.channelNo}`}
+                  device={device}
+                  accessToken={accessToken}
+                  region={region}
+                  mode={mode}
+                  recType={recType}
+                  playbackTime={playbackTime}
+                  playbackEndTime={playbackEndTime}
+                  isActive={isAllActive}
+                />
+              ))}
             </div>
-          </div>
+          )}
         </section>
       </main>
     </div>
