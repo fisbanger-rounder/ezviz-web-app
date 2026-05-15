@@ -30,10 +30,11 @@ interface CameraPlayerProps {
   playbackEndTime: string;
   isActive: boolean;
   index: number;
+  onStatusChange: (deviceSerial: string, channelNo: number, status: number) => void;
 }
 
 const CameraPlayer: React.FC<CameraPlayerProps> = ({
-  device, accessToken, region, mode, recType, playbackTime, playbackEndTime, isActive, index
+  device, accessToken, region, mode, recType, playbackTime, playbackEndTime, isActive, index, onStatusChange
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
@@ -101,11 +102,17 @@ const CameraPlayer: React.FC<CameraPlayerProps> = ({
           setError("Player error");
           setIsLoading(false);
           setIsPlaying(false);
+          if (device.status !== 0) {
+            onStatusChange(device.deviceSerial, device.channelNo, 0);
+          }
         },
         handleSuccess: () => {
           setIsPlaying(true);
           setIsLoading(false);
           setError(null);
+          if (device.status !== 1) {
+            onStatusChange(device.deviceSerial, device.channelNo, 1);
+          }
         }
       });
     } catch (err) {
@@ -211,6 +218,16 @@ const App: React.FC = () => {
   const [selectedRecDevice, setSelectedRecDevice] = useState<string>('');
   const [isSingleRecActive, setIsSingleRecActive] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+
+  const updateDeviceStatus = (deviceSerial: string, channelNo: number, status: number) => {
+    setDevices(prevDevices =>
+      prevDevices.map(d =>
+        (d.deviceSerial === deviceSerial && d.channelNo === channelNo)
+          ? { ...d, status }
+          : d
+      )
+    );
+  };
 
   // Fetch token if AppKey/Secret are provided
   const fetchToken = async () => {
@@ -547,6 +564,7 @@ const App: React.FC = () => {
                     playbackTime={playbackTime}
                     playbackEndTime={playbackEndTime}
                     isActive={mode === 'live' ? isAllActive : isSingleRecActive}
+                    onStatusChange={updateDeviceStatus}
                   />
                 ))}
             </div>
