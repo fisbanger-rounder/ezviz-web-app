@@ -52,12 +52,17 @@ header {
 main {
   flex: 1;
   padding: 2rem;
-  max-width: 1400px;
+  max-width: 1800px;
   margin: 0 auto;
   width: 100%;
   display: grid;
   grid-template-columns: 350px 1fr;
   gap: 2rem;
+  transition: all 0.3s ease;
+}
+
+main.sidebar-hidden {
+  grid-template-columns: 1fr;
 }
 
 @media (max-width: 1024px) {
@@ -82,7 +87,7 @@ main {
 
 .cameras-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 1.5rem;
   width: 100%;
 }
@@ -141,6 +146,14 @@ main {
   aspect-ratio: 16/9;
   background: #000;
   position: relative;
+}
+
+.camera-player-container iframe,
+.camera-player-container video,
+.camera-player-container canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: fill;
 }
 
 .camera-footer {

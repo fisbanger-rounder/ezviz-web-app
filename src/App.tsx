@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Play, Video, Key, Calendar, AlertCircle, Info, Grid, Square, PlayCircle } from 'lucide-react';
+import { Camera, Play, Video, Key, Calendar, AlertCircle, Info, Grid, Square, PlayCircle, Menu } from 'lucide-react';
 import { format } from 'date-fns';
 import { EZUIKitPlayer } from 'ezuikit-js';
 
@@ -13,7 +13,10 @@ declare global {
 interface Device {
   deviceSerial: string;
   channelNo: number;
-  cameraName: string;
+  cameraName?: string;
+  deviceName?: string;
+  name?: string;
+  channelName?: string;
   status: number;
 }
 
@@ -26,10 +29,11 @@ interface CameraPlayerProps {
   playbackTime: string;
   playbackEndTime: string;
   isActive: boolean;
+  index: number;
 }
 
 const CameraPlayer: React.FC<CameraPlayerProps> = ({
-  device, accessToken, region, mode, recType, playbackTime, playbackEndTime, isActive
+  device, accessToken, region, mode, recType, playbackTime, playbackEndTime, isActive, index
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
@@ -40,8 +44,17 @@ const CameraPlayer: React.FC<CameraPlayerProps> = ({
   const playerId = `video-container-${device.deviceSerial}-${device.channelNo}`;
 
   useEffect(() => {
-    setLocalIsActive(isActive);
-  }, [isActive]);
+    let timeoutId: any;
+    if (isActive) {
+      // Stagger the global start to prevent ezuikit-js crash (800ms per camera)
+      timeoutId = setTimeout(() => {
+        setLocalIsActive(true);
+      }, index * 800);
+    } else {
+      setLocalIsActive(false);
+    }
+    return () => clearTimeout(timeoutId);
+  }, [isActive, index]);
 
   useEffect(() => {
     if (localIsActive) {
@@ -76,9 +89,9 @@ const CameraPlayer: React.FC<CameraPlayerProps> = ({
         id: playerId,
         accessToken: accessToken,
         url: url,
-        template: mode === 'live' ? 'pcLive' : 'pcRec',
-        width: containerRef.current?.clientWidth || 400,
-        height: containerRef.current?.clientHeight || 225,
+        template: mode === 'live' ? 'simple' : 'pcRec',
+        width: '100%',
+        height: '100%',
         autoplay: true,
         staticPath: '/ezuikit_static',
         ...(region !== 'https://open.ys7.com' ? { env: { domain: region } } : {}),
@@ -111,10 +124,15 @@ const CameraPlayer: React.FC<CameraPlayerProps> = ({
     setIsPlaying(false);
   };
 
+  const displayName = device.channelName || device.name || device.deviceName || device.cameraName;
+  const headerTitle = displayName ? `${device.deviceSerial} - ${displayName}` : device.deviceSerial;
+
   return (
     <div className="camera-card">
       <div className="camera-header">
-        <div className="camera-title" title={device.cameraName}>{device.cameraName || device.deviceSerial}</div>
+        <div className="camera-title" title={headerTitle}>
+          {headerTitle}
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <button
             onClick={() => setLocalIsActive(!localIsActive)}
@@ -180,6 +198,7 @@ const App: React.FC = () => {
 
   // Single or All mode
   const [isAllActive, setIsAllActive] = useState(false);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
 
   // Fetch token if AppKey/Secret are provided
   const fetchToken = async () => {
@@ -260,15 +279,25 @@ const App: React.FC = () => {
   return (
     <div className="app-container">
       <header>
-        <div className="logo">PLN UP2D BANTEN CCTV-AI</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <button 
+            onClick={() => setIsSidebarVisible(!isSidebarVisible)}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+            title="Toggle Sidebar"
+          >
+            <Menu size={24} />
+          </button>
+          <div className="logo">PLN UP2D BANTEN CCTV-AI</div>
+        </div>
         <div className="status-badge">
           <Info size={14} />
           {devices.length > 0 ? `${devices.length} Cameras Loaded` : 'SDK v5.1.18 Ready'}
         </div>
       </header>
 
-      <main>
-        <aside className="panel">
+      <main className={isSidebarVisible ? '' : 'sidebar-hidden'}>
+        {isSidebarVisible && (
+          <aside className="panel">
           <div className="mode-toggle">
             <button
               className={`mode-btn ${mode === 'live' ? 'active' : ''}`}
@@ -390,6 +419,7 @@ const App: React.FC = () => {
             </div>
           )}
         </aside>
+        )}
 
         <section className="video-section">
           {devices.length === 0 ? (
@@ -400,9 +430,10 @@ const App: React.FC = () => {
             </div>
           ) : (
             <div className="cameras-grid">
-              {devices.map((device) => (
+              {devices.map((device, index) => (
                 <CameraPlayer
                   key={`${device.deviceSerial}-${device.channelNo}`}
+                  index={index}
                   device={device}
                   accessToken={accessToken}
                   region={region}
