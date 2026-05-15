@@ -46,16 +46,22 @@ const CameraPlayer: React.FC<CameraPlayerProps> = ({
 
   useEffect(() => {
     let timeoutId: any;
+
+    // Auto-play only if globally active AND device is online
     if (isActive) {
-      // Stagger the global start to prevent ezuikit-js crash (800ms per camera)
-      timeoutId = setTimeout(() => {
-        setLocalIsActive(true);
-      }, index * 800);
+      if (device.status === 1) {
+        timeoutId = setTimeout(() => {
+          setLocalIsActive(true);
+        }, index * 800);
+      } else {
+        setLocalIsActive(false);
+      }
     } else {
       setLocalIsActive(false);
     }
+
     return () => clearTimeout(timeoutId);
-  }, [isActive, index]);
+  }, [isActive, device.status, index]);
 
   useEffect(() => {
     if (localIsActive) {
@@ -99,7 +105,7 @@ const CameraPlayer: React.FC<CameraPlayerProps> = ({
         ...(region !== 'https://open.ys7.com' ? { env: { domain: region } } : {}),
         handleError: (err: any) => {
           console.error(`EZUIKit Error (${device.deviceSerial}):`, err);
-          setError("Player error");
+          setError("Device Offline");
           setIsLoading(false);
           setIsPlaying(false);
           if (device.status !== 0) {
@@ -287,6 +293,7 @@ const App: React.FC = () => {
       if (data.code === '200') {
         setDevices(data.data);
         setError(null);
+        setIsAllActive(true); // Autoplay all online cameras when successfully fetched
       } else {
         setError(data.msg || "Failed to fetch device list");
       }
@@ -296,6 +303,45 @@ const App: React.FC = () => {
       setIsLoading(false);
     }
   };
+
+  // Background polling to update device status (Online/Offline) every 30 seconds
+  useEffect(() => {
+    if (!accessToken || devices.length === 0) return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const response = await fetch(`${region}/api/lapp/camera/list`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: `accessToken=${accessToken}&pageStart=0&pageSize=50`,
+        });
+
+        const data = await response.json();
+
+        if (data.code === '200' && data.data) {
+          setDevices(prevDevices => {
+            let hasChanges = false;
+            const updatedDevices = prevDevices.map(prevDev => {
+              const freshDev = data.data.find((d: any) => d.deviceSerial === prevDev.deviceSerial && d.channelNo === prevDev.channelNo);
+              if (freshDev && freshDev.status !== prevDev.status) {
+                hasChanges = true;
+                return { ...prevDev, status: freshDev.status };
+              }
+              return prevDev;
+            });
+
+            return hasChanges ? updatedDevices : prevDevices;
+          });
+        }
+      } catch (err) {
+        console.error("Background polling failed", err);
+      }
+    }, 30000); // 30 seconds interval
+
+    return () => clearInterval(intervalId);
+  }, [accessToken, region, devices.length]);
 
   const toggleAllStreams = () => {
     if (devices.length === 0) {
